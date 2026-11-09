@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Events · LastSeat</title>
+  <style>
+    body { margin: 0; background: #f6f5f0; color: #18251e; font: 1rem/1.6 system-ui, sans-serif; }
+    main { max-width: 48rem; margin: 4rem auto; padding: 0 1.5rem; }
+    h1 { font-size: 2.5rem; line-height: 1.2; }
+    ul { padding: 0; list-style: none; }
+    li { padding: 1.5rem 0; border-top: 1px solid #cad0c8; }
+    h2 { margin: 0 0 .25rem; font-size: 1.25rem; }
+    time { color: #4d6052; }
+    .error { color: #8e271b; }
+  </style>
+</head>
+<body>
+  <main>
+    <p>LastSeat</p>
+    <h1>Events</h1>
+    {% if error %}
+      <p class="error" role="alert">{{ error }}</p>
+    {% elif events %}
+      <ul>
+        {% for event in events %}
+          <li>
+            <h2>{{ event.name }}</h2>
+            <time datetime="{{ event.starts_at.isoformat() }}">
+              {{ event.starts_at.strftime('%d %b %Y, %H:%M %Z') }}
+            </time>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p>No events yet. Check back soon.</p>
+    {% endif %}
+  </main>
+</body>
+</html>
