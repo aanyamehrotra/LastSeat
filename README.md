@@ -18,12 +18,36 @@ Open http://127.0.0.1:5000. The development server is for local use.
 Set DATABASE_URL to your PostgreSQL connection string when using a different database.
 Keep credentials out of Git.
 
+## Day 3 · November 10 · Create an event
+
+Organizers create events through a local command. Run it in the same environment
+as the web app, with DATABASE_URL set. This keeps organizer access local until
+authenticated administration is implemented.
+
+```sh
+flask --app app create-event --name "Friday Gig" \
+  --starts-at "2026-12-04T19:00:00+05:30" --seat A1 --seat A2
+```
+
+The name and seat labels are trimmed. Seat labels must be distinct, and the
+date/time must include an offset. Up to 1000 seats can be created per event.
+The database commits the event and seats together. A failed seat insertion rolls
+back the whole event. Re-running a successful command creates a new event.
+
+Run the database integration checks against a **dedicated empty test database**:
+
+```sh
+createdb lastseat_test
+psql -X -v ON_ERROR_STOP=1 -d lastseat_test -f schema.sql
+TEST_DATABASE_URL="dbname=lastseat_test" python -m unittest discover -s tests -v
+```
+
 ## Day 2 · November 9 · Event list
 
 The home page reads events from PostgreSQL and orders them by start time and ID.
 It shows a friendly empty state and returns HTTP 503 when the database is unavailable.
 Event names are escaped by the template engine. Times include the database session's
-time zone. Event creation and seat selection are upcoming milestones.
+time zone. Seat selection is an upcoming milestone.
 
 ## Day 1 · Event inventory
 
