@@ -68,3 +68,51 @@ class CreateEventTests(unittest.TestCase):
         finally:
             with psycopg.connect(self.database_url) as connection:
                 connection.execute("ALTER TABLE seats DROP CONSTRAINT test_rejected_label")
+
+    def test_event_page_isolates_seats_and_escapes_labels(self):
+        first = self.create("--seat", "<b>A1</b>", "--seat", "A2")
+        second = self.create("--seat", "OTHER_EVENT_ONLY")
+        self.assertEqual(first.exit_code, 0, first.output)
+        self.assertEqual(second.exit_code, 0, second.output)
+        event_ids = [int(result.output.split()[2]) for result in (first, second)]
+        try:
+            client = app.test_client()
+            home = client.get("/").get_data(as_text=True)
+            self.assertIn(f'href="/events/{event_ids[0]}"', home)
+            page = client.get(f"/events/{event_ids[0]}")
+            self.assertEqual(page.status_code, 200)
+            body = page.get_data(as_text=True)
+            self.assertIn("&lt;b&gt;A1&lt;/b&gt;", body)
+            self.assertNotIn("<b>A1</b>", body)
+            self.assertNotIn("OTHER_EVENT_ONLY", body)
+            self.assertIn("A2", body)
+            self.assertIn('href="/"', body)
+        finally:
+            with psycopg.connect(self.database_url) as connection:
+                for event_id in event_ids:
+                    connection.execute("DELETE FROM seats WHERE event_id = %s", (event_id,))
+                    connection.execute("DELETE FROM events WHERE id = %s", (event_id,))
+
+    def test_event_without_seats_and_missing_event(self):
+        with psycopg.connect(self.database_url) as connection:
+            event_id = connection.execute(
+                "INSERT INTO events(name, starts_at) VALUES (%s, %s) RETURNING id",
+                ("No seats", "2026-12-04T19:00:00+05:30"),
+            ).fetchone()[0]
+        try:
+            response = app.test_client().get(f"/events/{event_id}")
+            self.assertEqual(response.status_code, 200)
+            self.assertIn("No seats have been added", response.get_data(as_text=True))
+        finally:
+            with psycopg.connect(self.database_url) as connection:
+                connection.execute("DELETE FROM events WHERE id = %s", (event_id,))
+        self.assertEqual(app.test_client().get(f"/events/{event_id}").status_code, 404)
+        self.assertEqual(app.test_client().get("/events/99999999999999999999").status_code, 404)
+
+    def test_seat_page_database_failure(self):
+        with patch.dict(os.environ, {"DATABASE_URL": "host=127.0.0.1 port=1 dbname=lastseat"}):
+            response = app.test_client().get("/events/1")
+        self.assertEqual(response.status_code, 503)
+        body = response.get_data(as_text=True)
+        self.assertIn("temporarily unavailable", body)
+        self.assertNotIn("connection failed", body)

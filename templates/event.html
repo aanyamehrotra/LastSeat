@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ event.name if event else 'Seats unavailable' }} · LastSeat</title>
+  <style>
+    body { margin: 0; background: #f6f5f0; color: #18251e; font: 1rem/1.6 system-ui, sans-serif; }
+    main { max-width: 48rem; margin: 4rem auto; padding: 0 1.5rem; }
+    h1 { font-size: 2.5rem; line-height: 1.2; overflow-wrap: anywhere; }
+    ul { display: grid; grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr)); gap: .75rem; padding: 0; list-style: none; }
+    li { padding: 1rem; border: 1px solid #879b8d; border-radius: .5rem; text-align: center; overflow-wrap: anywhere; }
+    time { color: #4d6052; }
+    .error { color: #8e271b; }
+  </style>
+</head>
+<body>
+  <main>
+    <a href="{{ url_for('list_events') }}">All events</a>
+    {% if error %}
+      <h1>Seats unavailable</h1>
+      <p class="error" role="alert">{{ error }}</p>
+    {% else %}
+      <h1>{{ event.name }}</h1>
+      <time datetime="{{ event.starts_at.isoformat() }}">
+        {{ event.starts_at.strftime('%d %b %Y, %H:%M %Z') }}
+      </time>
+      <h2>Seats</h2>
+      {% if seats %}
+        <ul aria-label="Event seats">
+          {% for label in seats %}
+            <li>{{ label }}</li>
+          {% endfor %}
+        </ul>
+        <p>Seat reservations are coming soon.</p>
+      {% else %}
+        <p>No seats have been added to this event.</p>
+      {% endif %}
+    {% endif %}
+  </main>
+</body>
+</html>

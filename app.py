@@ -3,7 +3,7 @@ from datetime import datetime
 
 import click
 
-from flask import Flask, render_template
+from flask import Flask, abort, render_template
 import psycopg
 from psycopg.rows import dict_row
 
@@ -28,6 +28,38 @@ def list_events():
         ), 503
 
     return render_template("events.html", events=events, error=None)
+
+
+@app.get("/events/<int:event_id>")
+def show_event(event_id):
+    if event_id > 2147483647:
+        abort(404)
+    try:
+        with psycopg.connect(
+            os.environ.get("DATABASE_URL", "dbname=lastseat"),
+            connect_timeout=5,
+            row_factory=dict_row,
+        ) as connection:
+            rows = connection.execute(
+                """
+                SELECT e.name, e.starts_at, s.label
+                FROM events e
+                LEFT JOIN seats s ON s.event_id = e.id
+                WHERE e.id = %s
+                ORDER BY s.label
+                """,
+                (event_id,),
+            ).fetchall()
+    except psycopg.Error:
+        app.logger.exception("Could not load event seats")
+        return render_template(
+            "event.html", event=None, seats=[], error="Seats are temporarily unavailable. Please try again."
+        ), 503
+
+    if not rows:
+        abort(404)
+    seats = [row["label"] for row in rows if row["label"] is not None]
+    return render_template("event.html", event=rows[0], seats=seats, error=None)
 
 
 @app.cli.command("create-event")

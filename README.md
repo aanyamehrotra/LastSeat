@@ -18,6 +18,17 @@ Open http://127.0.0.1:5000. The development server is for local use.
 Set DATABASE_URL to your PostgreSQL connection string when using a different database.
 Keep credentials out of Git.
 
+## Day 4 · November 11 · Event seats
+
+Open an event from the home page to see its seats at /events/ID.
+The page displays seat labels in alphabetical order in a responsive grid.
+Labels are inventory, and reservations will be added next. The grid does not
+claim a physical venue layout because the database currently stores only labels.
+
+A single query joins the event to its seats, filtered by event ID. A left join
+keeps events with no seats visible. Unknown events return HTTP 404; database
+failures return HTTP 503. Event names and seat labels are escaped in the HTML.
+
 ## Day 3 · November 10 · Create an event
 
 Organizers create events through a local command. Run it in the same environment
@@ -47,7 +58,7 @@ TEST_DATABASE_URL="dbname=lastseat_test" python -m unittest discover -s tests -v
 The home page reads events from PostgreSQL and orders them by start time and ID.
 It shows a friendly empty state and returns HTTP 503 when the database is unavailable.
 Event names are escaped by the template engine. Times include the database session's
-time zone. Seat selection is an upcoming milestone.
+time zone. Each event links to its seat page. Seat reservations are an upcoming milestone.
 
 ## Day 1 · Event inventory
 
