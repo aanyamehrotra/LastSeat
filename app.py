@@ -1,9 +1,10 @@
 import os
 from datetime import datetime
+from uuid import uuid4
 
 import click
 
-from flask import Flask, abort, render_template
+from flask import Flask, abort, jsonify, render_template, request
 import psycopg
 from psycopg.rows import dict_row
 
@@ -60,6 +61,45 @@ def show_event(event_id):
         abort(404)
     seats = [row["label"] for row in rows if row["label"] is not None]
     return render_template("event.html", event=rows[0], seats=seats, error=None)
+
+
+@app.post("/events/<int:event_id>/holds")
+def hold_seat(event_id):
+    if event_id > 2147483647:
+        abort(404)
+    data = request.get_json(silent=True)
+    label = data.get("seat") if isinstance(data, dict) else None
+    if not isinstance(label, str) or not 1 <= len(label.strip()) <= 20:
+        return jsonify(error="Provide a seat label between 1 and 20 characters."), 400
+
+    token = uuid4()
+    try:
+        with psycopg.connect(
+            os.environ.get("DATABASE_URL", "dbname=lastseat"),
+            connect_timeout=5,
+        ) as connection:
+            held = connection.execute(
+                """
+                UPDATE seats
+                SET hold_token = %s,
+                    hold_expires_at = clock_timestamp() + interval '2 minutes'
+                WHERE event_id = %s AND label = %s
+                  AND (hold_token IS NULL OR hold_expires_at <= clock_timestamp())
+                RETURNING hold_expires_at
+                """,
+                (token, event_id, label.strip()),
+            ).fetchone()
+    except psycopg.Error:
+        app.logger.exception("Could not hold seat")
+        return jsonify(error="Could not reserve the seat. Please try again."), 503
+
+    if held is None:
+        return jsonify(error="Seat is unavailable or does not exist."), 409
+    response = jsonify(
+        seat=label.strip(), hold_token=str(token), expires_at=held[0].isoformat()
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response, 201
 
 
 @app.cli.command("create-event")

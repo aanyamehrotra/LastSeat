@@ -18,6 +18,41 @@ Open http://127.0.0.1:5000. The development server is for local use.
 Set DATABASE_URL to your PostgreSQL connection string when using a different database.
 Keep credentials out of Git.
 
+## Day 5 · November 12 · Atomic seat holds
+
+For an existing database created before Day 5, apply this migration once:
+
+```sh
+psql -X -v ON_ERROR_STOP=1 -d lastseat -f migrations/001_seat_holds.sql
+```
+
+New databases use the current schema.sql directly. Stop the app during migration
+and restart with the new code. Existing events and seats are preserved.
+
+Create a two-minute hold through the JSON endpoint (replace 1 with the event ID):
+
+```sh
+curl -i -X POST http://127.0.0.1:5000/events/1/holds \
+  -H 'Content-Type: application/json' -d '{"seat":"A1"}'
+```
+
+A successful response is HTTP 201 with a random hold_token and expires_at.
+Keep the token private; the later confirmation endpoint will require it.
+Invalid input returns 400, an occupied or missing seat returns 409, and a database
+failure returns 503. The browser reservation controls and confirmation are upcoming.
+
+One conditional UPDATE both checks availability and writes the hold. PostgreSQL
+locks the matching row, so competing requests recheck availability after the
+winner commits. The primary key targets one event/seat pair. The connection
+context commits before success is returned and rolls back on database failure.
+Expiry uses the database clock; a new request can replace an expired hold.
+Tokens and expiry must either both exist or both be null, enforced by a constraint.
+
+Day 5 verification passed all 11 tests on both a fresh database and a migrated
+database containing legacy inventory. Eight simultaneous real HTTP requests for
+one seat produced one 201 response and seven 409 responses. This is a correctness
+check; the planned 100-request demo and performance measurements are upcoming.
+
 ## Day 4 · November 11 · Event seats
 
 Open an event from the home page to see its seats at /events/ID.
