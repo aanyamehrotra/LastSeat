@@ -18,6 +18,14 @@ Open http://127.0.0.1:5000. The development server is for local use.
 Set DATABASE_URL to your PostgreSQL connection string when using a different database.
 Keep credentials out of Git.
 
+## Day 6 · Completed early on November 12 · Hold expiry
+
+The seat page now shows Available or Held using the PostgreSQL clock.
+Expired holds appear available immediately when the page is refreshed, and
+the next hold request replaces the old token atomically. No cleanup worker is
+needed for correctness. The page uses no-store caching and never includes hold
+tokens. Availability is a snapshot; only a successful hold response reserves a seat.
+
 ## Day 5 · November 12 · Atomic seat holds
 
 For an existing database created before Day 5, apply this migration once:

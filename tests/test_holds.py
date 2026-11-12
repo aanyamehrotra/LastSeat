@@ -116,3 +116,23 @@ class HoldTests(unittest.TestCase):
             response = app.test_client().post(self.path, json={"seat": "A1"})
         self.assertEqual(response.status_code, 503)
         self.assertNotIn("connection failed", response.get_data(as_text=True))
+
+
+    def test_page_reflects_hold_expiry_without_exposing_token(self):
+        client = app.test_client()
+        page_path = f"/events/{self.event_id}"
+        self.assertIn("Available", client.get(page_path).get_data(as_text=True))
+        hold = client.post(self.path, json={"seat": "A1"}).get_json()
+        response = client.get(page_path)
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        self.assertIn("Held", response.get_data(as_text=True))
+        self.assertNotIn(hold["hold_token"], response.get_data(as_text=True))
+        with psycopg.connect(self.database_url) as connection:
+            connection.execute(
+                "UPDATE seats SET hold_expires_at = clock_timestamp() - interval '1 second' WHERE event_id = %s",
+                (self.event_id,),
+            )
+        self.assertIn("Available", client.get(page_path).get_data(as_text=True))
+        replacement = client.post(self.path, json={"seat": "A1"})
+        self.assertEqual(replacement.status_code, 201)
+        self.assertNotEqual(hold["hold_token"], replacement.get_json()["hold_token"])

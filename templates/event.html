@@ -28,11 +28,11 @@
       <h2>Seats</h2>
       {% if seats %}
         <ul aria-label="Event seats">
-          {% for label in seats %}
-            <li>{{ label }}</li>
+          {% for seat in seats %}
+            <li>{{ seat.label }}<br><span>{{ seat.status }}</span></li>
           {% endfor %}
         </ul>
-        <p>Seat reservations are coming soon.</p>
+        <p>Refresh to see current availability. Holds last two minutes.</p>
       {% else %}
         <p>No seats have been added to this event.</p>
       {% endif %}

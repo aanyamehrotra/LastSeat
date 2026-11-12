@@ -43,7 +43,9 @@ def show_event(event_id):
         ) as connection:
             rows = connection.execute(
                 """
-                SELECT e.name, e.starts_at, s.label
+                SELECT e.name, e.starts_at, s.label,
+                       CASE WHEN s.hold_expires_at > clock_timestamp()
+                            THEN 'Held' ELSE 'Available' END AS status
                 FROM events e
                 LEFT JOIN seats s ON s.event_id = e.id
                 WHERE e.id = %s
@@ -59,8 +61,12 @@ def show_event(event_id):
 
     if not rows:
         abort(404)
-    seats = [row["label"] for row in rows if row["label"] is not None]
-    return render_template("event.html", event=rows[0], seats=seats, error=None)
+    seats = [row for row in rows if row["label"] is not None]
+    response = app.make_response(
+        render_template("event.html", event=rows[0], seats=seats, error=None)
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.post("/events/<int:event_id>/holds")
