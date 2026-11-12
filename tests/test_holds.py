@@ -136,3 +136,91 @@ class HoldTests(unittest.TestCase):
         replacement = client.post(self.path, json={"seat": "A1"})
         self.assertEqual(replacement.status_code, 201)
         self.assertNotEqual(hold["hold_token"], replacement.get_json()["hold_token"])
+
+    def test_confirmation_persists_and_booked_seat_stays_unavailable(self):
+        client = app.test_client()
+        hold = client.post(self.path, json={"seat": "A1"}).get_json()
+        response = client.post(
+            f"/events/{self.event_id}/bookings", json={"seat": "A1", "hold_token": hold["hold_token"]}
+        )
+        self.assertEqual(response.status_code, 201)
+        booking = response.get_json()
+        with psycopg.connect(self.database_url) as connection:
+            stored = connection.execute(
+                "SELECT booking_id, booked_at FROM seats WHERE event_id = %s", (self.event_id,)
+            ).fetchone()
+            connection.execute(
+                "UPDATE seats SET hold_expires_at = clock_timestamp() - interval '1 second' WHERE event_id = %s",
+                (self.event_id,),
+            )
+        self.assertEqual(str(stored[0]), booking["booking_id"])
+        self.assertEqual(stored[1].isoformat(), booking["booked_at"])
+        self.assertEqual(client.post(self.path, json={"seat": "A1"}).status_code, 409)
+        page = client.get(f"/events/{self.event_id}").get_data(as_text=True)
+        self.assertIn("Booked", page)
+        self.assertNotIn(booking["booking_id"], page)
+        self.assertNotIn(hold["hold_token"], page)
+
+    def test_confirmation_rejects_wrong_expired_and_replaced_tokens(self):
+        client = app.test_client()
+        path = f"/events/{self.event_id}/bookings"
+        old = client.post(self.path, json={"seat": "A1"}).get_json()["hold_token"]
+        wrong = client.post(path, json={"seat": "A1", "hold_token": "00000000-0000-0000-0000-000000000000"})
+        self.assertEqual(wrong.status_code, 409)
+        with psycopg.connect(self.database_url) as connection:
+            connection.execute(
+                "UPDATE seats SET hold_expires_at = clock_timestamp() - interval '1 second' WHERE event_id = %s",
+                (self.event_id,),
+            )
+        self.assertEqual(client.post(path, json={"seat": "A1", "hold_token": old}).status_code, 409)
+        current = client.post(self.path, json={"seat": "A1"}).get_json()["hold_token"]
+        self.assertEqual(client.post(path, json={"seat": "A1", "hold_token": old}).status_code, 409)
+        self.assertEqual(client.post(path, json={"seat": "A1", "hold_token": current}).status_code, 201)
+
+    def test_confirmation_validation(self):
+        client = app.test_client()
+        path = f"/events/{self.event_id}/bookings"
+        for payload in (None, [], {}, {"seat": "A1"}, {"seat": "A1", "hold_token": 1},
+                        {"seat": "A1", "hold_token": "invalid"}):
+            with self.subTest(payload=payload):
+                self.assertEqual(client.post(path, json=payload).status_code, 400)
+
+    def test_competing_confirmations_create_only_one_booking(self):
+        hold = app.test_client().post(self.path, json={"seat": "A1"}).get_json()
+        barrier = threading.Barrier(2)
+
+        def confirm(_):
+            with app.test_client() as client:
+                barrier.wait(timeout=10)
+                return client.post(
+                    f"/events/{self.event_id}/bookings",
+                    json={"seat": "A1", "hold_token": hold["hold_token"]},
+                ).status_code
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            self.assertEqual(sorted(pool.map(confirm, range(2))), [201, 409])
+
+    def test_failed_confirmation_rolls_back_and_can_be_attempted_again(self):
+        client = app.test_client()
+        hold = client.post(self.path, json={"seat": "A1"}).get_json()
+        with psycopg.connect(self.database_url) as connection:
+            connection.execute(
+                "ALTER TABLE seats ADD CONSTRAINT test_booking_failure CHECK (booking_id IS NULL)"
+            )
+        path = f"/events/{self.event_id}/bookings"
+        try:
+            with self.assertLogs(app.logger, level="ERROR") as logs:
+                response = client.post(path, json={"seat": "A1", "hold_token": hold["hold_token"]})
+            self.assertEqual(response.status_code, 503)
+            self.assertNotIn(hold["hold_token"], "\n".join(logs.output))
+            with psycopg.connect(self.database_url) as connection:
+                stored = connection.execute(
+                    "SELECT booking_id, booked_at, hold_token FROM seats WHERE event_id = %s",
+                    (self.event_id,),
+                ).fetchone()
+            self.assertEqual(stored[:2], (None, None))
+            self.assertEqual(str(stored[2]), hold["hold_token"])
+        finally:
+            with psycopg.connect(self.database_url) as connection:
+                connection.execute("ALTER TABLE seats DROP CONSTRAINT test_booking_failure")
+        self.assertEqual(client.post(path, json={"seat": "A1", "hold_token": hold["hold_token"]}).status_code, 201)

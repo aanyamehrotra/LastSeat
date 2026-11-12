@@ -1,6 +1,6 @@
 import os
 from datetime import datetime
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import click
 
@@ -22,8 +22,8 @@ def list_events():
             events = connection.execute(
                 "SELECT id, name, starts_at FROM events ORDER BY starts_at, id"
             ).fetchall()
-    except psycopg.Error:
-        app.logger.exception("Could not load events")
+    except psycopg.Error as error:
+        app.logger.error("Could not load events (SQLSTATE %s)", error.sqlstate or "connection")
         return render_template(
             "events.html", events=[], error="Events are temporarily unavailable. Please try again."
         ), 503
@@ -44,7 +44,8 @@ def show_event(event_id):
             rows = connection.execute(
                 """
                 SELECT e.name, e.starts_at, s.label,
-                       CASE WHEN s.hold_expires_at > clock_timestamp()
+                       CASE WHEN s.booking_id IS NOT NULL THEN 'Booked'
+                            WHEN s.hold_expires_at > clock_timestamp()
                             THEN 'Held' ELSE 'Available' END AS status
                 FROM events e
                 LEFT JOIN seats s ON s.event_id = e.id
@@ -53,8 +54,8 @@ def show_event(event_id):
                 """,
                 (event_id,),
             ).fetchall()
-    except psycopg.Error:
-        app.logger.exception("Could not load event seats")
+    except psycopg.Error as error:
+        app.logger.error("Could not load event seats (SQLSTATE %s)", error.sqlstate or "connection")
         return render_template(
             "event.html", event=None, seats=[], error="Seats are temporarily unavailable. Please try again."
         ), 503
@@ -90,19 +91,65 @@ def hold_seat(event_id):
                 SET hold_token = %s,
                     hold_expires_at = clock_timestamp() + interval '2 minutes'
                 WHERE event_id = %s AND label = %s
+                  AND booking_id IS NULL
                   AND (hold_token IS NULL OR hold_expires_at <= clock_timestamp())
                 RETURNING hold_expires_at
                 """,
                 (token, event_id, label.strip()),
             ).fetchone()
-    except psycopg.Error:
-        app.logger.exception("Could not hold seat")
+    except psycopg.Error as error:
+        app.logger.error("Could not hold seat (SQLSTATE %s)", error.sqlstate or "connection")
         return jsonify(error="Could not reserve the seat. Please try again."), 503
 
     if held is None:
         return jsonify(error="Seat is unavailable or does not exist."), 409
     response = jsonify(
         seat=label.strip(), hold_token=str(token), expires_at=held[0].isoformat()
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response, 201
+
+
+@app.post("/events/<int:event_id>/bookings")
+def confirm_booking(event_id):
+    if event_id > 2147483647:
+        abort(404)
+    data = request.get_json(silent=True)
+    label = data.get("seat") if isinstance(data, dict) else None
+    token = data.get("hold_token") if isinstance(data, dict) else None
+    if not isinstance(label, str) or not 1 <= len(label.strip()) <= 20:
+        return jsonify(error="Provide a seat label between 1 and 20 characters."), 400
+    try:
+        token = UUID(token) if isinstance(token, str) else None
+    except ValueError:
+        token = None
+    if token is None:
+        return jsonify(error="Provide a valid hold token."), 400
+
+    booking_id = uuid4()
+    try:
+        with psycopg.connect(
+            os.environ.get("DATABASE_URL", "dbname=lastseat"), connect_timeout=5
+        ) as connection:
+            booked = connection.execute(
+                """
+                UPDATE seats
+                SET booking_id = %s, booked_at = clock_timestamp()
+                WHERE event_id = %s AND label = %s
+                  AND hold_token = %s AND hold_expires_at > clock_timestamp()
+                  AND booking_id IS NULL
+                RETURNING booked_at
+                """,
+                (booking_id, event_id, label.strip(), token),
+            ).fetchone()
+    except psycopg.Error as error:
+        app.logger.error("Could not confirm booking (SQLSTATE %s)", error.sqlstate or "connection")
+        return jsonify(error="Could not confirm the booking. Please try again."), 503
+
+    if booked is None:
+        return jsonify(error="Hold is expired, replaced, already confirmed, or does not exist."), 409
+    response = jsonify(
+        booking_id=str(booking_id), seat=label.strip(), booked_at=booked[0].isoformat()
     )
     response.headers["Cache-Control"] = "no-store"
     return response, 201
@@ -144,8 +191,8 @@ def create_event(name, starts_at, seats):
                     "INSERT INTO seats (event_id, label) VALUES (%s, %s)",
                     [(event_id, label) for label in labels],
                 )
-    except psycopg.Error:
-        app.logger.exception("Could not create event")
+    except psycopg.Error as error:
+        app.logger.error("Could not create event (SQLSTATE %s)", error.sqlstate or "connection")
         raise click.ClickException("Could not create the event. No partial event was saved.")
 
     click.echo(f"Created event {event_id} with {len(labels)} seats.")

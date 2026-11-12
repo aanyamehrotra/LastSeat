@@ -18,6 +18,34 @@ Open http://127.0.0.1:5000. The development server is for local use.
 Set DATABASE_URL to your PostgreSQL connection string when using a different database.
 Keep credentials out of Git.
 
+## Day 7 · Completed early on November 12 · Confirm a booking
+
+For existing databases, apply migrations in order, once each. After 001_seat_holds.sql:
+
+```sh
+psql -X -v ON_ERROR_STOP=1 -d lastseat -f migrations/002_bookings.sql
+```
+
+Use the seat and hold token from a successful hold response:
+
+```sh
+curl -i -X POST http://127.0.0.1:5000/events/1/bookings \
+  -H 'Content-Type: application/json' \
+  -d '{"seat":"A1","hold_token":"REPLACE_WITH_YOUR_HOLD_TOKEN"}'
+```
+
+Confirmation returns HTTP 201 with booking_id and booked_at. One conditional
+UPDATE requires the current token and an unexpired hold. Wrong, expired,
+replaced, or already confirmed holds return 409. Invalid input returns 400,
+and database failures return 503. Booked seats can never be held again,
+including after their original hold deadline passes. The page shows Booked.
+
+The seat stores its booking ID and confirmation timestamp together. Keeping one
+booking per seat makes the invariant simple. Hold tokens remain private. Browser
+booking controls and safe confirmation replay are upcoming. At this milestone,
+repeating a successful confirmation returns 409. Day 8 on November 13 will
+make retries return the existing ticket safely.
+
 ## Day 6 · Completed early on November 12 · Hold expiry
 
 The seat page now shows Available or Held using the PostgreSQL clock.
@@ -133,6 +161,14 @@ ROLLBACK;
 ```
 
 ## Build plan · November 8–27, 2026
+
+Days 6 and 7 were completed early on November 12 at the user's request.
+Resume with Day 8 on November 13, then one next milestone per day.
+This targets Day 20 on November 25, leaving November 26–27 for final verification
+and remaining fixes. Day 7 verification passed all 17 tests on fresh and migrated
+PostgreSQL databases, including stale-token rejection, competing confirmations,
+and rollback after an injected database failure. Logs omit database row details
+so hold tokens are not included in error output.
 
 | Days | Milestones in order |
 | --- | --- |
