@@ -18,6 +18,31 @@ Open http://127.0.0.1:5000. The development server is for local use.
 Set DATABASE_URL to your PostgreSQL connection string when using a different database.
 Keep credentials out of Git.
 
+## Day 8 · November 13 · Safe confirmation retries
+
+Repeat the confirmation request with the same event, seat, and hold token.
+The first confirmation returns 201; a retry returns 200 with the original
+booking_id, booked_at, and seat. A confirmed booking can be recovered after
+its old hold deadline passes. An expired unconfirmed hold still returns 409.
+The token must match even when a booking already exists.
+
+The conditional UPDATE remains the first step. If it changes no row, a SELECT
+in the same transaction looks for a confirmed booking owned by that token.
+PostgreSQL's default READ COMMITTED isolation gives that second statement a
+fresh snapshot, so it sees a concurrent winner after the UPDATE waits.
+The booking is immutable in this application. This avoids creating another
+ticket or extending the hold on a replay. No database migration is needed.
+
+If a connection drops after commit, the caller can retry the same request to
+recover the saved ticket. A 503 can also occur around commit, so the caller
+should retry with the same token instead of assuming the booking failed.
+Tests cover concurrent confirmations, replay after expiry, wrong-token rejection,
+and an HTTP client that disconnects before reading its first confirmation response.
+
+Day 8 verification passed all 19 PostgreSQL integration tests, including two
+simultaneous confirmations receiving the same ticket and recovery through a real
+HTTP retry after the first client disconnected without reading the response.
+
 ## Day 7 · Completed early on November 12 · Confirm a booking
 
 For existing databases, apply migrations in order, once each. After 001_seat_holds.sql:
@@ -35,16 +60,14 @@ curl -i -X POST http://127.0.0.1:5000/events/1/bookings \
 ```
 
 Confirmation returns HTTP 201 with booking_id and booked_at. One conditional
-UPDATE requires the current token and an unexpired hold. Wrong, expired,
-replaced, or already confirmed holds return 409. Invalid input returns 400,
+UPDATE requires the current token and an unexpired hold. Wrong, expired unconfirmed,
+or replaced holds return 409. Invalid input returns 400,
 and database failures return 503. Booked seats can never be held again,
 including after their original hold deadline passes. The page shows Booked.
 
 The seat stores its booking ID and confirmation timestamp together. Keeping one
 booking per seat makes the invariant simple. Hold tokens remain private. Browser
-booking controls and safe confirmation replay are upcoming. At this milestone,
-repeating a successful confirmation returns 409. Day 8 on November 13 will
-make retries return the existing ticket safely.
+booking controls are upcoming. Day 8 adds safe confirmation replay.
 
 ## Day 6 · Completed early on November 12 · Hold expiry
 

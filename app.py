@@ -138,21 +138,33 @@ def confirm_booking(event_id):
                 WHERE event_id = %s AND label = %s
                   AND hold_token = %s AND hold_expires_at > clock_timestamp()
                   AND booking_id IS NULL
-                RETURNING booked_at
+                RETURNING booking_id, booked_at
                 """,
                 (booking_id, event_id, label.strip(), token),
             ).fetchone()
+            status = 201
+            if booked is None:
+                # A concurrent confirmation may have committed while our UPDATE waited.
+                booked = connection.execute(
+                    """
+                    SELECT booking_id, booked_at FROM seats
+                    WHERE event_id = %s AND label = %s AND hold_token = %s
+                      AND booking_id IS NOT NULL
+                    """,
+                    (event_id, label.strip(), token),
+                ).fetchone()
+                status = 200
     except psycopg.Error as error:
         app.logger.error("Could not confirm booking (SQLSTATE %s)", error.sqlstate or "connection")
         return jsonify(error="Could not confirm the booking. Please try again."), 503
 
     if booked is None:
-        return jsonify(error="Hold is expired, replaced, already confirmed, or does not exist."), 409
+        return jsonify(error="Hold is expired, replaced, or does not exist."), 409
     response = jsonify(
-        booking_id=str(booking_id), seat=label.strip(), booked_at=booked[0].isoformat()
+        booking_id=str(booked[0]), seat=label.strip(), booked_at=booked[1].isoformat()
     )
     response.headers["Cache-Control"] = "no-store"
-    return response, 201
+    return response, status
 
 
 @app.cli.command("create-event")

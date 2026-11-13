@@ -2,6 +2,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 import json
 import os
+import socket
 import threading
 import unittest
 import urllib.error
@@ -192,13 +193,16 @@ class HoldTests(unittest.TestCase):
         def confirm(_):
             with app.test_client() as client:
                 barrier.wait(timeout=10)
-                return client.post(
+                response = client.post(
                     f"/events/{self.event_id}/bookings",
                     json={"seat": "A1", "hold_token": hold["hold_token"]},
-                ).status_code
+                )
+                return response.status_code, response.get_json()
 
         with ThreadPoolExecutor(max_workers=2) as pool:
-            self.assertEqual(sorted(pool.map(confirm, range(2))), [201, 409])
+            responses = list(pool.map(confirm, range(2)))
+        self.assertEqual(sorted(status for status, _ in responses), [200, 201])
+        self.assertEqual(responses[0][1], responses[1][1])
 
     def test_failed_confirmation_rolls_back_and_can_be_attempted_again(self):
         client = app.test_client()
@@ -224,3 +228,68 @@ class HoldTests(unittest.TestCase):
             with psycopg.connect(self.database_url) as connection:
                 connection.execute("ALTER TABLE seats DROP CONSTRAINT test_booking_failure")
         self.assertEqual(client.post(path, json={"seat": "A1", "hold_token": hold["hold_token"]}).status_code, 201)
+
+
+    def test_confirmation_replay_after_expiry_returns_original_ticket(self):
+        client = app.test_client()
+        hold = client.post(self.path, json={"seat": "A1"}).get_json()
+        payload = {"seat": "A1", "hold_token": hold["hold_token"]}
+        path = f"/events/{self.event_id}/bookings"
+        first = client.post(path, json=payload)
+        self.assertEqual(first.status_code, 201)
+        with psycopg.connect(self.database_url) as connection:
+            connection.execute(
+                "UPDATE seats SET hold_expires_at = clock_timestamp() - interval '1 second' WHERE event_id = %s",
+                (self.event_id,),
+            )
+        replay = client.post(path, json=payload)
+        self.assertEqual(replay.status_code, 200)
+        self.assertEqual(replay.get_json(), first.get_json())
+        self.assertEqual(replay.headers["Cache-Control"], "no-store")
+        payload["hold_token"] = "00000000-0000-0000-0000-000000000000"
+        self.assertEqual(client.post(path, json=payload).status_code, 409)
+
+    def test_retry_recovers_ticket_when_http_client_disconnects(self):
+        hold = app.test_client().post(self.path, json={"seat": "A1"}).get_json()
+        path = f"/events/{self.event_id}/bookings"
+        payload = {"seat": "A1", "hold_token": hold["hold_token"]}
+        completed = threading.Event()
+
+        def observe_confirmation(environ, start_response):
+            result = app(environ, start_response)
+            if environ["PATH_INFO"] == path:
+                completed.set()
+            return result
+
+        server = make_server("127.0.0.1", 0, observe_confirmation, threaded=True)
+        server_thread = threading.Thread(target=server.serve_forever)
+        server_thread.start()
+        try:
+            body = json.dumps(payload).encode()
+            request = (
+                f"POST {path} HTTP/1.1\r\n"
+                "Host: localhost\r\nContent-Type: application/json\r\n"
+                f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n"
+            ).encode() + body
+            with socket.create_connection(("127.0.0.1", server.server_port), timeout=10) as client:
+                client.sendall(request)
+                # Disconnect without reading the booking response.
+            self.assertTrue(completed.wait(timeout=10))
+            with psycopg.connect(self.database_url) as connection:
+                original = connection.execute(
+                    "SELECT booking_id, booked_at FROM seats WHERE event_id = %s", (self.event_id,)
+                ).fetchone()
+            self.assertIsNotNone(original[0])
+            retry = urllib.request.Request(
+                f"http://127.0.0.1:{server.server_port}{path}",
+                data=body, headers={"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(retry, timeout=10) as response:
+                self.assertEqual(response.status, 200)
+                recovered = json.load(response)
+            self.assertEqual(recovered["booking_id"], str(original[0]))
+            self.assertEqual(recovered["booked_at"], original[1].isoformat())
+        finally:
+            server.shutdown()
+            server.server_close()
+            server_thread.join()
