@@ -18,6 +18,31 @@ Open http://127.0.0.1:5000. The development server is for local use.
 Set DATABASE_URL to your PostgreSQL connection string when using a different database.
 Keep credentials out of Git.
 
+## Day 9 · November 14 · Browser booking flow
+
+Open an event, choose an available seat, and confirm the two-minute hold.
+The page displays the saved ticket number. Held and booked seats are disabled.
+The hold and receipt are saved in sessionStorage for this browser tab; refreshing
+can restore them. Closing the tab clears that storage. Keep the ticket number.
+If storage is blocked, keep the page open until confirmation.
+
+If the confirmation response is lost, use Retry confirmation with the same hold
+token. The server returns the original ticket. Buttons are disabled while requests
+are pending, and server errors are shown in the page. Availability is a snapshot;
+refresh the page when another visitor takes a seat. Holds still expire on the
+database clock. The live countdown is the next milestone.
+
+Day 9 verification passed all 19 PostgreSQL/HTTP integration tests and four
+JavaScript control tests covering booking, refresh recovery, lost-response retry,
+and stale-hold rejection. The live server also served the correct controls and
+script. Visual browser verification remains pending because browser capture failed.
+
+Run the JavaScript tests with Node.js 22 or newer:
+
+```sh
+node --test tests/booking.test.cjs
+```
+
 ## Day 8 · November 13 · Safe confirmation retries
 
 Repeat the confirmation request with the same event, seat, and hold token.

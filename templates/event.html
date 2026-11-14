@@ -9,7 +9,13 @@
     main { max-width: 48rem; margin: 4rem auto; padding: 0 1.5rem; }
     h1 { font-size: 2.5rem; line-height: 1.2; overflow-wrap: anywhere; }
     ul { display: grid; grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr)); gap: .75rem; padding: 0; list-style: none; }
-    li { padding: 1rem; border: 1px solid #879b8d; border-radius: .5rem; text-align: center; overflow-wrap: anywhere; }
+    li { padding: 0; text-align: center; overflow-wrap: anywhere; }
+    button { font: inherit; cursor: pointer; border: 1px solid #476952; border-radius: .4rem; padding: .65rem 1rem; background: #e2eddf; color: #18251e; }
+    button:disabled { cursor: default; opacity: .6; }
+    button:focus-visible { outline: 3px solid #235f9c; outline-offset: 3px; }
+    .seat { width: 100%; }
+    #reservation { border-top: 1px solid #cad0c8; margin-top: 2rem; padding-top: 1rem; }
+    #ticket { overflow-wrap: anywhere; }
     time { color: #4d6052; }
     .error { color: #8e271b; }
   </style>
@@ -29,10 +35,29 @@
       {% if seats %}
         <ul aria-label="Event seats">
           {% for seat in seats %}
-            <li>{{ seat.label }}<br><span>{{ seat.status }}</span></li>
+            <li>
+              <button type="button" class="seat" data-seat="{{ seat.label }}"
+                      data-status="{{ seat.status }}" disabled>
+                {{ seat.label }}<br><span>{{ seat.status }}</span>
+              </button>
+            </li>
           {% endfor %}
         </ul>
-        <p>Refresh to see current availability. Holds last two minutes.</p>
+        <p>Choose a seat to hold it for two minutes, then confirm your booking.</p>
+        <p><a href="{{ url_for('show_event', event_id=event.id) }}">Refresh availability</a></p>
+        <noscript><p>Enable JavaScript to reserve a seat.</p></noscript>
+        <p id="booking-message" role="status" aria-live="polite"></p>
+        <p id="storage-warning" hidden>Keep this page open. This browser could not save your hold for a refresh.</p>
+        <section id="reservation" hidden
+                 data-hold-url="{{ url_for('hold_seat', event_id=event.id) }}"
+                 data-booking-url="{{ url_for('confirm_booking', event_id=event.id) }}">
+          <h2 id="reservation-title">Your hold</h2>
+          <p id="hold-summary"></p>
+          <p id="ticket"></p>
+          <button id="confirm-booking" type="button">Confirm booking</button>
+          <button id="another-seat" type="button" hidden>Book another seat</button>
+        </section>
+        <script src="{{ url_for('static', filename='booking.js') }}" defer></script>
       {% else %}
         <p>No seats have been added to this event.</p>
       {% endif %}

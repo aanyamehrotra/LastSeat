@@ -43,7 +43,7 @@ def show_event(event_id):
         ) as connection:
             rows = connection.execute(
                 """
-                SELECT e.name, e.starts_at, s.label,
+                SELECT e.id, e.name, e.starts_at, s.label,
                        CASE WHEN s.booking_id IS NOT NULL THEN 'Booked'
                             WHEN s.hold_expires_at > clock_timestamp()
                             THEN 'Held' ELSE 'Available' END AS status
