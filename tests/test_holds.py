@@ -293,3 +293,70 @@ class HoldTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
             server_thread.join()
+
+    def test_confirmation_rechecks_expiry_after_waiting_for_row_lock(self):
+        import time
+
+        client = app.test_client()
+        token = client.post(self.path, json={"seat": "A1"}).get_json()["hold_token"]
+        path = f"/events/{self.event_id}/bookings"
+        with psycopg.connect(self.database_url) as blocker:
+            blocker.execute("SELECT label FROM seats WHERE event_id = %s FOR UPDATE", (self.event_id,))
+            with patch.dict(os.environ, {"DATABASE_URL": self.database_url + " application_name=lastseat_expiry_test"}):
+                with ThreadPoolExecutor(max_workers=1) as pool:
+                    future = pool.submit(
+                        lambda: app.test_client().post(path, json={"seat": "A1", "hold_token": token})
+                    )
+                    try:
+                        waiting = False
+                        deadline = time.monotonic() + 5
+                        with psycopg.connect(self.database_url, autocommit=True) as observer:
+                            while time.monotonic() < deadline:
+                                waiting = observer.execute(
+                                    "SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE application_name = %s AND wait_event_type = 'Lock')",
+                                    ("lastseat_expiry_test",),
+                                ).fetchone()[0]
+                                if waiting:
+                                    break
+                                observer.execute("SELECT pg_sleep(0.02)")
+                        self.assertTrue(waiting, "Confirmation did not reach the expected row-lock wait")
+                        blocker.execute(
+                            "UPDATE seats SET hold_expires_at = clock_timestamp() - interval '1 second' WHERE event_id = %s",
+                            (self.event_id,),
+                        )
+                    finally:
+                        blocker.commit()
+                    response = future.result(timeout=10)
+        self.assertEqual(response.status_code, 409)
+        with psycopg.connect(self.database_url) as connection:
+            self.assertIsNone(connection.execute(
+                "SELECT booking_id FROM seats WHERE event_id = %s", (self.event_id,)
+            ).fetchone()[0])
+
+    def test_identical_seat_labels_in_different_events_have_independent_holds(self):
+        with psycopg.connect(self.database_url) as connection:
+            other_id = connection.execute(
+                "INSERT INTO events(name, starts_at) VALUES (%s, %s) RETURNING id",
+                ("Other event", "2026-12-04T19:00:00+05:30"),
+            ).fetchone()[0]
+            connection.execute("INSERT INTO seats(event_id, label) VALUES (%s, 'A1')", (other_id,))
+        try:
+            client = app.test_client()
+            first = client.post(self.path, json={"seat": "A1"})
+            second = client.post(f"/events/{other_id}/holds", json={"seat": "A1"})
+            self.assertEqual((first.status_code, second.status_code), (201, 201))
+            self.assertNotEqual(first.get_json()["hold_token"], second.get_json()["hold_token"])
+            wrong = client.post(
+                f"/events/{other_id}/bookings",
+                json={"seat": "A1", "hold_token": first.get_json()["hold_token"]},
+            )
+            self.assertEqual(wrong.status_code, 409)
+            valid = client.post(
+                f"/events/{other_id}/bookings",
+                json={"seat": "A1", "hold_token": second.get_json()["hold_token"]},
+            )
+            self.assertEqual(valid.status_code, 201)
+        finally:
+            with psycopg.connect(self.database_url) as connection:
+                connection.execute("DELETE FROM seats WHERE event_id = %s", (other_id,))
+                connection.execute("DELETE FROM events WHERE id = %s", (other_id,))

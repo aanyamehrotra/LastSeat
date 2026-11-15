@@ -18,6 +18,16 @@ Open http://127.0.0.1:5000. The development server is for local use.
 Set DATABASE_URL to your PostgreSQL connection string when using a different database.
 Keep credentials out of Git.
 
+## Day 11 · November 16 · Booking conflict verification
+
+The database tests now observe a real confirmation waiting for a row lock,
+expire its hold in the blocking transaction, and verify that confirmation
+rechecks the updated row and returns 409 without creating a ticket.
+A separate test checks that identical seat labels in different events receive
+independent holds and that one event's token cannot confirm the other event's seat.
+All 21 PostgreSQL/HTTP tests and six JavaScript tests passed. Browser visual
+verification remains pending.
+
 ## Day 10 · November 15 · Live hold countdown
 
 The hold panel shows minutes and seconds remaining, recalculated from the saved
