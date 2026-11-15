@@ -28,12 +28,27 @@ function saveHold() {
   }
 }
 
+function updateCountdown() {
+  const countdown = document.querySelector("#hold-countdown");
+  countdown.hidden = !hold || Boolean(hold.booking);
+  if (countdown.hidden) return;
+  const seconds = Math.max(0, Math.ceil((Date.parse(hold.expires_at) - Date.now()) / 1000));
+  if (!Number.isFinite(seconds)) {
+    countdown.textContent = "Hold time unavailable. Confirm to check its status.";
+  } else if (seconds === 0) {
+    countdown.textContent = "Hold time has ended. Confirm to check for an existing ticket, or refresh availability after the server rejects an expired hold.";
+  } else {
+    countdown.textContent = "Time remaining " + Math.floor(seconds / 60) + ":" + String(seconds % 60).padStart(2, "0");
+  }
+}
+
 function render() {
   for (const button of seats) {
     button.disabled = busy || Boolean(hold) || button.dataset.status !== "Available";
   }
   reservation.hidden = !hold;
   confirmButton.disabled = busy;
+  updateCountdown();
   if (!hold) return;
 
   const booked = Boolean(hold.booking);
@@ -117,3 +132,5 @@ anotherButton.addEventListener("click", () => {
 });
 
 render();
+
+setInterval(updateCountdown, 1000);

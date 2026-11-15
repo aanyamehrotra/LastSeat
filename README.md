@@ -18,6 +18,15 @@ Open http://127.0.0.1:5000. The development server is for local use.
 Set DATABASE_URL to your PostgreSQL connection string when using a different database.
 Keep credentials out of Git.
 
+## Day 10 · November 15 · Live hold countdown
+
+The hold panel shows minutes and seconds remaining, recalculated from the saved
+deadline every second. Refreshing uses the same deadline. The countdown is an
+estimate based on the device clock; PostgreSQL decides whether a hold is valid.
+When time ends, the token remains available for confirmation recovery, because
+an earlier confirmation may have succeeded despite a lost response. A booked
+ticket hides the timer. Browser visual verification remains pending.
+
 ## Day 9 · November 14 · Browser booking flow
 
 Open an event, choose an available seat, and confirm the two-minute hold.

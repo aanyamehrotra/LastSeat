@@ -8,7 +8,7 @@ const source = fs.readFileSync(path.join(__dirname, "../static/booking.js"), "ut
 const held = { seat: "A1", hold_token: "test-token", expires_at: "2026-12-04T19:00:00+05:30" };
 const ticket = { seat: "A1", booking_id: "saved-ticket" };
 
-function page(fetch, saved = null) {
+function page(fetch, saved = null, now = Date.now()) {
   function element(dataset = {}) {
     return {
       dataset, hidden: false, disabled: true, textContent: "", listeners: {},
@@ -17,13 +17,14 @@ function page(fetch, saved = null) {
   }
   const elements = {};
   for (const id of ["reservation", "booking-message", "confirm-booking", "another-seat",
-                    "storage-warning", "reservation-title", "hold-summary", "ticket"]) {
+                    "storage-warning", "reservation-title", "hold-summary", "ticket", "hold-countdown"]) {
     elements["#" + id] = element();
   }
   elements["#reservation"].dataset = { holdUrl: "/events/1/holds", bookingUrl: "/events/1/bookings" };
   const seats = ["A1", "A2"].map(seat => element({ seat, status: "Available" }));
   let storage = saved ? JSON.stringify(saved) : null;
   let reloaded = false;
+  let tick;
   vm.runInNewContext(source, {
     document: {
       querySelector: selector => elements[selector],
@@ -35,10 +36,13 @@ function page(fetch, saved = null) {
       removeItem: () => { storage = null; },
     },
     location: { reload() { reloaded = true; } },
-    fetch, AbortSignal, Date,
+    fetch, AbortSignal,
+    Date: class extends Date { static now() { return now; } },
+    setInterval(callback) { tick = callback; },
   });
   return {
     elements, seats,
+    advance(milliseconds) { now += milliseconds; tick(); },
     click: target => target.listeners.click(),
     saved: () => JSON.parse(storage),
     reloaded: () => reloaded,
@@ -100,4 +104,26 @@ test("a rejected hold confirmation clears stale state and shows the error", asyn
   assert.equal(ui.saved(), null);
   assert.equal(ui.elements["#reservation"].hidden, true);
   assert.match(ui.elements["#booking-message"].textContent, /Hold is expired/);
+});
+
+
+test("countdown follows the deadline and preserves recovery after expiry", async () => {
+  const start = Date.parse(held.expires_at) - 65000;
+  const ui = page(async () => response(200, ticket), held, start);
+  assert.equal(ui.elements["#hold-countdown"].textContent, "Time remaining 1:05");
+  ui.advance(64000);
+  assert.equal(ui.elements["#hold-countdown"].textContent, "Time remaining 0:01");
+  ui.advance(2000);
+  assert.match(ui.elements["#hold-countdown"].textContent, /Hold time has ended/);
+  assert.equal(ui.saved().hold_token, held.hold_token);
+  assert.equal(ui.elements["#confirm-booking"].disabled, false);
+  await ui.click(ui.elements["#confirm-booking"]);
+  assert.equal(ui.elements["#hold-countdown"].hidden, true);
+  assert.equal(ui.elements["#ticket"].textContent, "Ticket saved-ticket");
+});
+
+test("refresh of an expired hold keeps the token for a server status check", () => {
+  const ui = page(async () => response(409, { error: "Expired" }), held, Date.parse(held.expires_at) + 1000);
+  assert.match(ui.elements["#hold-countdown"].textContent, /Hold time has ended/);
+  assert.equal(ui.saved().hold_token, held.hold_token);
 });

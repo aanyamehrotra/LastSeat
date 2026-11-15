@@ -53,6 +53,7 @@
                  data-booking-url="{{ url_for('confirm_booking', event_id=event.id) }}">
           <h2 id="reservation-title">Your hold</h2>
           <p id="hold-summary"></p>
+          <p id="hold-countdown" hidden></p>
           <p id="ticket"></p>
           <button id="confirm-booking" type="button">Confirm booking</button>
           <button id="another-seat" type="button" hidden>Book another seat</button>
