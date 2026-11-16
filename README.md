@@ -18,6 +18,14 @@ Open http://127.0.0.1:5000. The development server is for local use.
 Set DATABASE_URL to your PostgreSQL connection string when using a different database.
 Keep credentials out of Git.
 
+## Day 12 · Completed early on November 16 · 100-request race
+
+The simultaneous HTTP test now starts 100 callers together against one seat.
+It requires one 201 response, 99 conflict responses, and the winner's token
+stored in PostgreSQL. The local threaded test server has a 128-connection
+listen queue. This verifies booking correctness under contention, with no
+production throughput claim.
+
 ## Day 11 · November 16 · Booking conflict verification
 
 The database tests now observe a real confirmation waiting for a row lock,

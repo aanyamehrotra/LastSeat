@@ -10,7 +10,7 @@ import urllib.request
 from unittest.mock import patch
 
 import psycopg
-from werkzeug.serving import make_server
+from werkzeug.serving import make_server, ThreadedWSGIServer
 
 from app import app
 
@@ -78,10 +78,13 @@ class HoldTests(unittest.TestCase):
             ).fetchone()[0])
 
     def test_simultaneous_http_requests_have_one_winner(self):
-        server = make_server("127.0.0.1", 0, app, threaded=True)
+        class RaceServer(ThreadedWSGIServer):
+            request_queue_size = 128
+
+        server = RaceServer("127.0.0.1", 0, app)
         server_thread = threading.Thread(target=server.serve_forever)
         server_thread.start()
-        barrier = threading.Barrier(8)
+        barrier = threading.Barrier(100)
 
         def reserve(_):
             barrier.wait(timeout=10)
@@ -91,16 +94,16 @@ class HoldTests(unittest.TestCase):
                 headers={"Content-Type": "application/json"},
             )
             try:
-                with urllib.request.urlopen(request, timeout=15) as response:
+                with urllib.request.urlopen(request, timeout=30) as response:
                     return response.status, json.load(response)
             except urllib.error.HTTPError as response:
                 with response:
                     return response.code, json.load(response)
 
         try:
-            with ThreadPoolExecutor(max_workers=8) as pool:
-                responses = list(pool.map(reserve, range(8)))
-            self.assertEqual(sorted(status for status, _ in responses), [201] + [409] * 7)
+            with ThreadPoolExecutor(max_workers=100) as pool:
+                responses = list(pool.map(reserve, range(100)))
+            self.assertEqual(sorted(status for status, _ in responses), [201] + [409] * 99)
             winner = next(body for status, body in responses if status == 201)
             with psycopg.connect(self.database_url) as connection:
                 stored = connection.execute(
