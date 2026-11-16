@@ -18,6 +18,19 @@ Open http://127.0.0.1:5000. The development server is for local use.
 Set DATABASE_URL to your PostgreSQL connection string when using a different database.
 Keep credentials out of Git.
 
+## Day 13 · Completed early on November 16 · Stale screens and retries
+
+A rejected seat is disabled until availability is refreshed. A lost hold response
+marks that seat as requiring refresh; it never invents a token or assumes success.
+Other seats remain usable. Repeated clicks during an active request send one
+request. Confirmation failures keep the existing token for a safe replay; a
+definitive rejection clears the stale token and asks for refreshed availability.
+All nine JavaScript tests pass. Day 12 passed all 21 PostgreSQL/HTTP tests,
+including the 100-caller race. Visual verification remains pending.
+
+Days 12 and 13 were completed early at the user's request on November 16.
+Resume with Day 14 on November 17, then one next milestone per day.
+
 ## Day 12 · Completed early on November 16 · 100-request race
 
 The simultaneous HTTP test now starts 100 callers together against one seat.

@@ -127,3 +127,37 @@ test("refresh of an expired hold keeps the token for a server status check", () 
   assert.match(ui.elements["#hold-countdown"].textContent, /Hold time has ended/);
   assert.equal(ui.saved().hold_token, held.hold_token);
 });
+
+
+test("a stale seat conflict disables that seat until refresh", async () => {
+  const ui = page(async () => response(409, { error: "Seat unavailable." }));
+  await ui.click(ui.seats[0]);
+  assert.equal(ui.seats[0].disabled, true);
+  assert.equal(ui.seats[0].dataset.status, "Unavailable");
+  assert.equal(ui.seats[1].disabled, false);
+  assert.match(ui.elements["#booking-message"].textContent, /Refresh availability/);
+});
+
+test("an unknown hold outcome requires refresh and stores no invented token", async () => {
+  const ui = page(async () => { throw new Error("Timed out"); });
+  await ui.click(ui.seats[0]);
+  assert.equal(ui.saved(), null);
+  assert.equal(ui.seats[0].disabled, true);
+  assert.equal(ui.seats[0].dataset.status, "Refresh needed");
+});
+
+test("repeated clicks while a hold request is pending send one request", async () => {
+  let finish;
+  let calls = 0;
+  const ui = page(() => {
+    calls++;
+    return new Promise(resolve => { finish = resolve; });
+  });
+  const pending = ui.click(ui.seats[0]);
+  await ui.click(ui.seats[0]);
+  assert.equal(calls, 1);
+  assert.equal(ui.seats[0].disabled, true);
+  finish(response(201, held));
+  await pending;
+  assert.equal(ui.saved().hold_token, held.hold_token);
+});

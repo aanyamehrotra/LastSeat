@@ -42,6 +42,14 @@ function updateCountdown() {
   }
 }
 
+function setSeatStatus(label, status) {
+  const button = seats.find(seat => seat.dataset.seat === label);
+  if (button) {
+    button.dataset.status = status;
+    button.textContent = label + " · " + status;
+  }
+}
+
 function render() {
   for (const button of seats) {
     button.disabled = busy || Boolean(hold) || button.dataset.status !== "Available";
@@ -81,12 +89,15 @@ for (const button of seats) {
       const { response, data } = await post(reservation.dataset.holdUrl, { seat: button.dataset.seat });
       if (response.ok) {
         hold = data;
+        setSeatStatus(hold.seat, "Held");
         saveHold();
         message.textContent = "Your seat is held. Confirm before the hold expires.";
       } else {
+        setSeatStatus(button.dataset.seat, response.status === 409 ? "Unavailable" : "Refresh needed");
         message.textContent = data.error + " Refresh availability before choosing again.";
       }
     } catch {
+      setSeatStatus(button.dataset.seat, "Refresh needed");
       message.textContent = "Could not retrieve the hold response. Refresh availability; any unconfirmed hold expires in two minutes.";
     } finally {
       busy = false;
@@ -106,9 +117,11 @@ confirmButton.addEventListener("click", async () => {
     });
     if (response.ok) {
       hold.booking = data;
+      setSeatStatus(hold.seat, "Booked");
       saveHold();
       message.textContent = "Save your ticket number.";
     } else if (response.status === 409 || response.status === 400) {
+      setSeatStatus(hold.seat, "Refresh needed");
       hold = null;
       saveHold();
       message.textContent = data.error + " Refresh availability to choose a seat.";
