@@ -270,3 +270,11 @@ Day 2 verification used a temporary PostgreSQL database and requests to the actu
 HTTP server. Checks passed for an empty database, chronological event ordering,
 escaped HTML in event names, machine-readable timestamps, and a 503 response
 without database details when the connection fails.
+
+## Day 14 · November 17 · GitHub test automation
+
+The Tests workflow runs on pushes and pull requests. It creates an isolated
+PostgreSQL 16 database, installs schema.sql, then runs the database/HTTP tests
+and JavaScript control tests using Python 3.12 and Node 22. The password in the
+workflow is only for its disposable test service. The job has read-only repository
+permissions and a ten-minute timeout. Visual browser verification remains pending.
