@@ -305,7 +305,7 @@ class HoldTests(unittest.TestCase):
         path = f"/events/{self.event_id}/bookings"
         with psycopg.connect(self.database_url) as blocker:
             blocker.execute("SELECT label FROM seats WHERE event_id = %s FOR UPDATE", (self.event_id,))
-            with patch.dict(os.environ, {"DATABASE_URL": self.database_url + " application_name=lastseat_expiry_test"}):
+            with patch.dict(os.environ, {"DATABASE_URL": psycopg.conninfo.make_conninfo(self.database_url, application_name="lastseat_expiry_test")}):
                 with ThreadPoolExecutor(max_workers=1) as pool:
                     future = pool.submit(
                         lambda: app.test_client().post(path, json={"seat": "A1", "hold_token": token})
