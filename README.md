@@ -278,3 +278,37 @@ PostgreSQL 16 database, installs schema.sql, then runs the database/HTTP tests
 and JavaScript control tests using Python 3.12 and Node 22. The password in the
 workflow is only for its disposable test service. The job has read-only repository
 permissions and a ten-minute timeout. Visual browser verification remains pending.
+
+## Day 15 · November 18 · Reproducible contention measurement
+
+Run against a dedicated test database with schema.sql installed:
+
+```sh
+TEST_DATABASE_URL="dbname=lastseat_test" python scripts/load_test.py
+```
+
+The script creates one temporary event/seat, runs a local threaded Werkzeug server,
+and sends 200 HTTP requests using 20 concurrent workers, ten requests per worker.
+It checks for one winner, 199 conflicts, and the winner's token in PostgreSQL.
+It stops its server and removes only its own inventory in a finally block.
+
+Observed on November 18, 2026:
+
+| Measurement | Result |
+| --- | --- |
+| Elapsed time | 1.461 seconds |
+| Throughput | 136.93 requests/second |
+| Median response time | 52.78 ms |
+| p95 response time | 946.86 ms |
+| Responses | 1 HTTP 201, 199 HTTP 409 |
+| Environment | macOS 26.5.2, arm64, 8 logical CPUs |
+| Runtime | Python 3.14.2, PostgreSQL 14.18 Homebrew |
+
+Latency includes local HTTP connection setup, server queueing, and a fresh database
+connection per request. Percentiles use nearest-rank over all 200 responses.
+Elapsed time covers worker startup and request completion. This is one short
+localhost contention sample using the development server's default listen queue.
+Most requests are rejected conflicts. It does not measure successful booking
+throughput, distributed clients, production hosting, or sustained capacity.
+The 100-simultaneous-caller correctness test remains separate. Visual browser
+verification remains pending.
