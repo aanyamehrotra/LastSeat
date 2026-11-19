@@ -312,3 +312,77 @@ Most requests are rejected conflicts. It does not measure successful booking
 throughput, distributed clients, production hosting, or sustained capacity.
 The 100-simultaneous-caller correctness test remains separate. Visual browser
 verification remains pending.
+
+## Day 16 · November 19 · Booking design and trade-offs
+
+### Request path and ownership
+
+The browser sends JSON to one Flask application. PostgreSQL owns seat availability,
+hold deadlines, and booking identity. The browser stores its current token and
+receipt in tab-scoped sessionStorage. Page availability and the local countdown
+are estimates; the write endpoint decides whether a request can succeed.
+
+### Data model and indexes
+
+An event has a generated integer ID, name, and timestamp. Each seat belongs to
+an event through a foreign key. Its composite primary key, (event_id, label),
+prevents duplicate labels within that event and creates a B-tree index usable
+for a particular seat or the seats of one event. The event primary key supports
+the event lookup. booking_id has a unique index to prevent duplicate ticket IDs.
+
+A seat stores its current hold and final booking directly. Check constraints
+require token/deadline and booking/timestamp pairs to be complete. A booked seat
+must retain a holder token. This representation supports one immutable booking
+per seat. Cancellation, transfers, payment records, booking history, and user
+accounts would require explicit lifecycle and authorization changes.
+
+### Transactions and competing requests
+
+| Operation | Transaction boundary | Result |
+| --- | --- | --- |
+| Create event | Insert event and all seats in one connection context | All inserts commit together or roll back |
+| Hold seat | One conditional UPDATE, commit before HTTP success | Only an unbooked, free or expired seat gets a token |
+| Confirm hold | Conditional UPDATE and, when needed, replay SELECT in one transaction | A valid holder creates a ticket or recovers its existing one |
+
+PostgreSQL row locks serialize competing updates to the same seat. Under the
+default READ COMMITTED isolation level, an UPDATE that waits for a changed row
+rechecks its condition against the updated version. The confirmation replay
+SELECT gets a new statement snapshot and can see the ticket committed by a
+concurrent winner. This reasoning assumes the application retains its default
+isolation level and confirmed bookings remain immutable.
+
+The database clock establishes hold expiry. Expired holds are replaced lazily by
+the next successful hold request, so correctness needs no background cleanup.
+Requests for different seats can proceed independently. Every request currently
+opens a new database connection.
+
+### Failures and recovery
+
+A failure before commit rolls back the transaction. A connection failure around
+commit can leave the client uncertain whether the write succeeded. Confirmation
+retries carry the same event, seat, and token, allowing the server to return the
+saved booking. Replays remain valid after the original hold deadline once that
+booking exists. A different token cannot recover it.
+
+A lost hold response cannot recover an unknown token in the current API. The
+browser asks for refreshed availability and the unconfirmed hold expires.
+Tokens act as bearer credentials; anyone possessing one can confirm or recover
+that hold's booking. Keep them out of URLs and logs and use HTTPS in deployment.
+Error logs record the SQLSTATE category without row values. Cache-Control
+no-store is used on hold/booking success responses and the seat page.
+
+### Scaling decisions to explain
+
+More application workers can serve different seats, while one popular seat
+still serializes at its database row. Connection pooling is a candidate when
+measurements show connection setup or limits dominate. Event lists currently
+sort all events with no pagination or starts_at index; growth should be measured
+before introducing those changes. A cache could accelerate event descriptions,
+but seat writes would still require PostgreSQL's availability check.
+
+The localhost load sample measures a conflict-heavy workload, not successful
+booking capacity. It includes the development server queue and new connections.
+A production evaluation needs a production WSGI server, deployment hardware,
+networked clients, successful bookings, sustained load, and separate error-rate
+reporting. Hosting, visual browser verification, and the isolated unsafe-versus-safe
+race demonstration remain pending project deliverables.
