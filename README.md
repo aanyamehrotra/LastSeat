@@ -1,329 +1,154 @@
 # LastSeat
 
-A ticket-booking app for the moment two people try to book the last seat. The goal is a small Python web app backed by PostgreSQL. The database will decide who holds a seat, even when requests arrive together.
+A seat-booking application built around the final-seat race. PostgreSQL grants
+two-minute holds atomically, confirms only the valid holder, and returns the
+original ticket when a confirmation is retried after a lost response.
+
+Built with Flask, PostgreSQL, plain JavaScript, and Gunicorn.
+
+## Release status
+
+The booking flow, desktop/mobile Chromium checks, database upgrades, the
+100-caller HTTP race, and production Gunicorn startup are verified. Live hosting
+is pending a connected account with the user's approved ₹0 spending limit.
+This repository contains a working local application and reproducible tests.
 
 ## Run locally
 
-Use Python 3.11 or newer and PostgreSQL 14 or newer. From a fresh checkout,
-create the database and install the schema once before starting the application:
+Use Python 3.11+, PostgreSQL 14+, and a running PostgreSQL service.
 
 ```sh
 git clone https://github.com/aanyamehrotra/LastSeat.git
 cd LastSeat
-createdb lastseat
-psql -X -v ON_ERROR_STOP=1 -d lastseat -f schema.sql
-```
-
-Then install dependencies and start the app:
-
-```sh
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+createdb lastseat
+psql -X -v ON_ERROR_STOP=1 -d lastseat -f schema.sql
 export DATABASE_URL="dbname=lastseat"
+flask --app app create-event --name "Friday Gig" \
+  --starts-at "2026-12-04T19:00:00+05:30" --seat A1 --seat A2
 flask --app app run
 ```
 
-Open http://127.0.0.1:5000. The development server is for local use.
-Set DATABASE_URL to your PostgreSQL connection string when using a different database.
-Keep credentials out of Git.
+Open http://127.0.0.1:5000, choose an event, hold a seat, and confirm it.
+The page shows the ticket number and keeps the current hold and receipt in
+sessionStorage for that tab. Save your ticket number. Closing the tab can clear
+that storage. When storage is unavailable, keep the page open until confirmation.
+Organizer event creation uses the local CLI. There is no payment processing.
 
-## Day 13 · Completed early on November 16 · Stale screens and retries
+For an existing pre-hold database, apply migrations/001_seat_holds.sql and
+migrations/002_bookings.sql once each, in order, using psql with ON_ERROR_STOP=1.
+A database already containing holds needs only 002. New databases use schema.sql
+directly. Stop the app during an upgrade and restart afterward. The migration
+test verifies that legacy events and seats survive and can be booked.
 
-A rejected seat is disabled until availability is refreshed. A lost hold response
-marks that seat as requiring refresh; it never invents a token or assumes success.
-Other seats remain usable. Repeated clicks during an active request send one
-request. Confirmation failures keep the existing token for a safe replay; a
-definitive rejection clears the stale token and asks for refreshed availability.
-All nine JavaScript tests pass. Day 12 passed all 21 PostgreSQL/HTTP tests,
-including the 100-caller race. Visual verification remains pending.
+## Test and demonstrate
 
-Days 12 and 13 were completed early at the user's request on November 16.
-Resume with Day 14 on November 17, then one next milestone per day.
-
-## Day 12 · Completed early on November 16 · 100-request race
-
-The simultaneous HTTP test now starts 100 callers together against one seat.
-It requires one 201 response, 99 conflict responses, and the winner's token
-stored in PostgreSQL. The local threaded test server has a 128-connection
-listen queue. This verifies booking correctness under contention, with no
-production throughput claim.
-
-## Day 11 · November 16 · Booking conflict verification
-
-The database tests now observe a real confirmation waiting for a row lock,
-expire its hold in the blocking transaction, and verify that confirmation
-rechecks the updated row and returns 409 without creating a ticket.
-A separate test checks that identical seat labels in different events receive
-independent holds and that one event's token cannot confirm the other event's seat.
-All 21 PostgreSQL/HTTP tests and six JavaScript tests passed. Browser visual
-verification remains pending.
-
-## Day 10 · November 15 · Live hold countdown
-
-The hold panel shows minutes and seconds remaining, recalculated from the saved
-deadline every second. Refreshing uses the same deadline. The countdown is an
-estimate based on the device clock; PostgreSQL decides whether a hold is valid.
-When time ends, the token remains available for confirmation recovery, because
-an earlier confirmation may have succeeded despite a lost response. A booked
-ticket hides the timer. Browser visual verification remains pending.
-
-## Day 9 · November 14 · Browser booking flow
-
-Open an event, choose an available seat, and confirm the two-minute hold.
-The page displays the saved ticket number. Held and booked seats are disabled.
-The hold and receipt are saved in sessionStorage for this browser tab; refreshing
-can restore them. Closing the tab clears that storage. Keep the ticket number.
-If storage is blocked, keep the page open until confirmation.
-
-If the confirmation response is lost, use Retry confirmation with the same hold
-token. The server returns the original ticket. Buttons are disabled while requests
-are pending, and server errors are shown in the page. Availability is a snapshot;
-refresh the page when another visitor takes a seat. Holds still expire on the
-database clock. The live countdown is the next milestone.
-
-Day 9 verification passed all 19 PostgreSQL/HTTP integration tests and four
-JavaScript control tests covering booking, refresh recovery, lost-response retry,
-and stale-hold rejection. The live server also served the correct controls and
-script. Visual browser verification remains pending because browser capture failed.
-
-Run the JavaScript tests with Node.js 22 or newer:
+Use a dedicated test database because the integration suite injects temporary
+constraints and creates isolated migration schemas.
 
 ```sh
-node --test tests/booking.test.cjs
-```
-
-## Day 8 · November 13 · Safe confirmation retries
-
-Repeat the confirmation request with the same event, seat, and hold token.
-The first confirmation returns 201; a retry returns 200 with the original
-booking_id, booked_at, and seat. A confirmed booking can be recovered after
-its old hold deadline passes. An expired unconfirmed hold still returns 409.
-The token must match even when a booking already exists.
-
-The conditional UPDATE remains the first step. If it changes no row, a SELECT
-in the same transaction looks for a confirmed booking owned by that token.
-PostgreSQL's default READ COMMITTED isolation gives that second statement a
-fresh snapshot, so it sees a concurrent winner after the UPDATE waits.
-The booking is immutable in this application. This avoids creating another
-ticket or extending the hold on a replay. No database migration is needed.
-
-If a connection drops after commit, the caller can retry the same request to
-recover the saved ticket. A 503 can also occur around commit, so the caller
-should retry with the same token instead of assuming the booking failed.
-Tests cover concurrent confirmations, replay after expiry, wrong-token rejection,
-and an HTTP client that disconnects before reading its first confirmation response.
-
-Day 8 verification passed all 19 PostgreSQL integration tests, including two
-simultaneous confirmations receiving the same ticket and recovery through a real
-HTTP retry after the first client disconnected without reading the response.
-
-## Day 7 · Completed early on November 12 · Confirm a booking
-
-For existing databases, apply migrations in order, once each. After 001_seat_holds.sql:
-
-```sh
-psql -X -v ON_ERROR_STOP=1 -d lastseat -f migrations/002_bookings.sql
-```
-
-Use the seat and hold token from a successful hold response:
-
-```sh
-curl -i -X POST http://127.0.0.1:5000/events/1/bookings \
-  -H 'Content-Type: application/json' \
-  -d '{"seat":"A1","hold_token":"REPLACE_WITH_YOUR_HOLD_TOKEN"}'
-```
-
-Confirmation returns HTTP 201 with booking_id and booked_at. One conditional
-UPDATE requires the current token and an unexpired hold. Wrong, expired unconfirmed,
-or replaced holds return 409. Invalid input returns 400,
-and database failures return 503. Booked seats can never be held again,
-including after their original hold deadline passes. The page shows Booked.
-
-The seat stores its booking ID and confirmation timestamp together. Keeping one
-booking per seat makes the invariant simple. Hold tokens remain private. Browser
-booking controls are upcoming. Day 8 adds safe confirmation replay.
-
-## Day 6 · Completed early on November 12 · Hold expiry
-
-The seat page now shows Available or Held using the PostgreSQL clock.
-Expired holds appear available immediately when the page is refreshed, and
-the next hold request replaces the old token atomically. No cleanup worker is
-needed for correctness. The page uses no-store caching and never includes hold
-tokens. Availability is a snapshot; only a successful hold response reserves a seat.
-
-## Day 5 · November 12 · Atomic seat holds
-
-For an existing database created before Day 5, apply this migration once:
-
-```sh
-psql -X -v ON_ERROR_STOP=1 -d lastseat -f migrations/001_seat_holds.sql
-```
-
-New databases use the current schema.sql directly. Stop the app during migration
-and restart with the new code. Existing events and seats are preserved.
-
-Create a two-minute hold through the JSON endpoint (replace 1 with the event ID):
-
-```sh
-curl -i -X POST http://127.0.0.1:5000/events/1/holds \
-  -H 'Content-Type: application/json' -d '{"seat":"A1"}'
-```
-
-A successful response is HTTP 201 with a random hold_token and expires_at.
-Keep the token private; the later confirmation endpoint will require it.
-Invalid input returns 400, an occupied or missing seat returns 409, and a database
-failure returns 503. The browser reservation controls and confirmation are upcoming.
-
-One conditional UPDATE both checks availability and writes the hold. PostgreSQL
-locks the matching row, so competing requests recheck availability after the
-winner commits. The primary key targets one event/seat pair. The connection
-context commits before success is returned and rolls back on database failure.
-Expiry uses the database clock; a new request can replace an expired hold.
-Tokens and expiry must either both exist or both be null, enforced by a constraint.
-
-Day 5 verification passed all 11 tests on both a fresh database and a migrated
-database containing legacy inventory. Eight simultaneous real HTTP requests for
-one seat produced one 201 response and seven 409 responses. This is a correctness
-check; the planned 100-request demo and performance measurements are upcoming.
-
-## Day 4 · November 11 · Event seats
-
-Open an event from the home page to see its seats at /events/ID.
-The page displays seat labels in alphabetical order in a responsive grid.
-Labels are inventory, and reservations will be added next. The grid does not
-claim a physical venue layout because the database currently stores only labels.
-
-A single query joins the event to its seats, filtered by event ID. A left join
-keeps events with no seats visible. Unknown events return HTTP 404; database
-failures return HTTP 503. Event names and seat labels are escaped in the HTML.
-
-## Day 3 · November 10 · Create an event
-
-Organizers create events through a local command. Run it in the same environment
-as the web app, with DATABASE_URL set. This keeps organizer access local until
-authenticated administration is implemented.
-
-```sh
-flask --app app create-event --name "Friday Gig" \
-  --starts-at "2026-12-04T19:00:00+05:30" --seat A1 --seat A2
-```
-
-The name and seat labels are trimmed. Seat labels must be distinct, and the
-date/time must include an offset. Up to 1000 seats can be created per event.
-The database commits the event and seats together. A failed seat insertion rolls
-back the whole event. Re-running a successful command creates a new event.
-
-Run the database integration checks against a **dedicated empty test database**:
-
-```sh
+pip install -r requirements-dev.txt
+python -m playwright install chromium
 createdb lastseat_test
 psql -X -v ON_ERROR_STOP=1 -d lastseat_test -f schema.sql
-TEST_DATABASE_URL="dbname=lastseat_test" python -m unittest discover -s tests -v
+export TEST_DATABASE_URL="dbname=lastseat_test"
+RUN_BROWSER_TESTS=1 python -m unittest discover -s tests -v
+node --test tests/booking.test.cjs
+python scripts/race_demo.py
+python scripts/load_test.py
 ```
 
-## Day 2 · November 9 · Event list
+The JavaScript tests require Node 22+. On Linux, install browser system
+dependencies with python -m playwright install --with-deps chromium.
+Without RUN_BROWSER_TESTS=1, the three Chromium tests are skipped.
 
-The home page reads events from PostgreSQL and orders them by start time and ID.
-It shows a friendly empty state and returns HTTP 503 when the database is unavailable.
-Event names are escaped by the template engine. Times include the database session's
-time zone. Each event links to its seat page. Seat reservations are an upcoming milestone.
+The release passed 25 Python tests, including three real Chromium tests, and
+10 JavaScript tests. Coverage includes a hold expiring during a row-lock wait,
+wrong/replaced tokens, confirmation replay after expiry, rollback on injected
+failure, cross-event isolation, legacy migrations, mobile layout, refresh
+recovery, and a browser response lost after the server committed the booking.
 
-## Day 1 · Event inventory
+The HTTP race test starts 100 callers together and requires one winner,
+99 conflicts, and the saved winning token. The separate race_demo script forces
+two callers through an unsafe SELECT-then-UPDATE sequence, showing two false
+success claims. It then calls the real hold endpoint through Flask test clients
+and checks one success and one conflict. Unsafe SQL is confined to that script's
+disposable event. The application always uses the protected endpoint.
 
-The first version models events and their seats. A seat label belongs to one event. Two events can each have an A1, but one event cannot list A1 twice.
+For a three-minute interview demo, run the unsafe comparison, explain the
+check/write gap, show the conditional UPDATE, then run the HTTP race test.
+Finish with the browser booking flow and explain why a lost confirmation
+response is recovered with the same token.
 
-With PostgreSQL running, create an empty database and install the schema once:
+## API
+
+| Endpoint | Input | Successful result |
+| --- | --- | --- |
+| GET / | None | Event list |
+| GET /events/ID | None | Seat page |
+| POST /events/ID/holds | JSON seat | 201 with hold_token and expires_at |
+| POST /events/ID/bookings | JSON seat and hold_token | 201 on first confirmation, 200 on replay |
+
+Invalid JSON/input returns 400. An unavailable or missing seat, invalid holder,
+or expired unconfirmed hold returns 409. Database failures return 503.
+Unknown event pages return 404. Successful hold and booking responses include
+Cache-Control no-store. Tokens belong in the JSON body and must remain private.
+
+## Production startup and deployment
 
 ```sh
-createdb lastseat
-psql -X -v ON_ERROR_STOP=1 -d lastseat -f schema.sql
+gunicorn app:app --bind "0.0.0.0:${PORT:-8000}" --workers 2 --threads 4 --timeout 30
 ```
 
-Try this in `psql -d lastseat`. The example rolls back so you can repeat it.
+Set DATABASE_URL to the persistent PostgreSQL connection string supplied by the
+host. Use its required SSL settings and HTTPS for browser traffic. Initialize the
+database with schema.sql once, or apply only the outstanding migrations for an
+existing database. Create demo inventory through the CLI against that database.
+The development flask run server is for local use.
 
-```sql
-BEGIN;
-WITH new_event AS (
-    INSERT INTO events (name, starts_at)
-    VALUES ('Friday Gig', '2026-12-04 19:00+05:30')
-    RETURNING id
-)
-INSERT INTO seats (event_id, label)
-SELECT id, label FROM new_event CROSS JOIN (VALUES ('A1'), ('A2')) AS row_seats(label);
+The Dockerfile packages the same Gunicorn entry point. It runs as an unprivileged
+user, reads PORT, and requires an external PostgreSQL database. GitHub CI runs
+the Python/browser and JavaScript suites, builds the image, and verifies its
+database-backed home page. Credentials belong in host environment settings.
 
-SELECT e.name, s.label
-FROM events e JOIN seats s ON s.event_id = e.id
-ORDER BY e.id, s.label;
-ROLLBACK;
-```
+Live deployment is still pending Render account connection. Only the approved
+₹0 allowance may be used. Render's Free web service sleeps after 15 idle minutes,
+and its Free PostgreSQL database expires after 30 days. Existing workspace usage
+and billing must be checked before provisioning within that allowance.
+See [Render's documented limits](https://render.com/docs/free).
 
-## Build plan · November 8–27, 2026
+## Measured local performance
 
-Days 6 and 7 were completed early on November 12 at the user's request.
-Resume with Day 8 on November 13, then one next milestone per day.
-This targets Day 20 on November 25, leaving November 26–27 for final verification
-and remaining fixes. Day 7 verification passed all 17 tests on fresh and migrated
-PostgreSQL databases, including stale-token rejection, competing confirmations,
-and rollback after an injected database failure. Logs omit database row details
-so hold tokens are not included in error output.
+A November 18, 2026 sample used 200 requests, 20 concurrent workers, and one seat.
 
-| Days | Milestones in order |
+| Measurement | Observed result |
 | --- | --- |
-| 1–4 | Model inventory. List events through the web app. Create an event with seats. Display its seat map. |
-| 5–8 | Acquire a hold atomically. Reclaim expired holds. Confirm a valid hold. Make confirmation retries return the same ticket. |
-| 9–12 | Connect the booking screen. Show hold expiry in the browser. Test conflicting bookings against PostgreSQL. Race 100 requests for one seat through the HTTP endpoint. |
-| 13–16 | Handle stale screens and retry errors. Run tests automatically on GitHub. Measure contention and record results. Document the transaction and its trade-offs. |
-| 17–20 | Rehearse setup from a fresh checkout. Prepare the demo and deploy if hosting is available. Fix issues from the rehearsal. Verify the release and write a resume bullet using measured results. |
-
-Day 2 verification used a temporary PostgreSQL database and requests to the actual
-HTTP server. Checks passed for an empty database, chronological event ordering,
-escaped HTML in event names, machine-readable timestamps, and a 503 response
-without database details when the connection fails.
-
-## Day 14 · November 17 · GitHub test automation
-
-The Tests workflow runs on pushes and pull requests. It creates an isolated
-PostgreSQL 16 database, installs schema.sql, then runs the database/HTTP tests
-and JavaScript control tests using Python 3.12 and Node 22. The password in the
-workflow is only for its disposable test service. The job has read-only repository
-permissions and a ten-minute timeout. Visual browser verification remains pending.
-
-## Day 15 · November 18 · Reproducible contention measurement
-
-Run against a dedicated test database with schema.sql installed:
-
-```sh
-TEST_DATABASE_URL="dbname=lastseat_test" python scripts/load_test.py
-```
-
-The script creates one temporary event/seat, runs a local threaded Werkzeug server,
-and sends 200 HTTP requests using 20 concurrent workers, ten requests per worker.
-It checks for one winner, 199 conflicts, and the winner's token in PostgreSQL.
-It stops its server and removes only its own inventory in a finally block.
-
-Observed on November 18, 2026:
-
-| Measurement | Result |
-| --- | --- |
-| Elapsed time | 1.461 seconds |
+| Responses | 1 HTTP 201 and 199 HTTP 409 |
+| Elapsed | 1.461 seconds |
 | Throughput | 136.93 requests/second |
-| Median response time | 52.78 ms |
-| p95 response time | 946.86 ms |
-| Responses | 1 HTTP 201, 199 HTTP 409 |
-| Environment | macOS 26.5.2, arm64, 8 logical CPUs |
+| Median latency | 52.78 ms |
+| p95 latency | 946.86 ms |
+| Machine | macOS 26.5.2, arm64, 8 logical CPUs |
 | Runtime | Python 3.14.2, PostgreSQL 14.18 Homebrew |
 
-Latency includes local HTTP connection setup, server queueing, and a fresh database
-connection per request. Percentiles use nearest-rank over all 200 responses.
-Elapsed time covers worker startup and request completion. This is one short
-localhost contention sample using the development server's default listen queue.
-Most requests are rejected conflicts. It does not measure successful booking
-throughput, distributed clients, production hosting, or sustained capacity.
-The 100-simultaneous-caller correctness test remains separate. Visual browser
-verification remains pending.
+Each worker sends ten requests. Latency includes localhost HTTP connection
+setup, the development server queue, and a fresh database connection. Percentiles
+use nearest-rank over 200 responses. Elapsed time includes worker startup.
+This single, short, conflict-heavy sample does not establish successful booking
+throughput or production capacity. The script prints environment details so
+future measurements can be compared honestly.
 
-## Day 16 · November 19 · Booking design and trade-offs
+## Resume wording
+
+Built LastSeat, a Flask/PostgreSQL seat-booking application with atomic expiring
+holds and idempotent confirmation recovery. Verified one winner across 100
+simultaneous HTTP requests and covered booking conflicts, database upgrades,
+and desktop/mobile flows with 35 automated tests.
+
+## Design and trade-offs
+
 
 ### Request path and ownership
 
@@ -394,41 +219,5 @@ The localhost load sample measures a conflict-heavy workload, not successful
 booking capacity. It includes the development server queue and new connections.
 A production evaluation needs a production WSGI server, deployment hardware,
 networked clients, successful bookings, sustained load, and separate error-rate
-reporting. Hosting, visual browser verification, and the isolated unsafe-versus-safe
-race demonstration remain pending project deliverables.
-
-
-## Day 17 · Completed early on November 19 · Fresh-checkout rehearsal
-
-A new GitHub clone, Python virtual environment, and empty PostgreSQL database
-successfully ran all 21 database/HTTP tests and nine JavaScript tests. The event
-creation command also succeeded. Setup instructions now put schema installation
-before application startup. The rehearsal used Python 3.14 on macOS; GitHub CI
-covers Python 3.12 on Ubuntu. Visual browser verification remains pending.
-
-## Day 18 · Completed early on November 19 · Interview race demo
-
-Run against a dedicated test database:
-
-```sh
-TEST_DATABASE_URL="dbname=lastseat_test" python scripts/race_demo.py
-```
-
-The unsafe half forces two independent connections to read availability before
-either writes. Both report success, but one token overwrites the other. The safe
-half calls the real Flask hold route through test clients and checks one success,
-one conflict, and the saved winner's token. This deterministic two-caller demo
-illustrates the bug. The separate 100-caller test exercises the actual HTTP server.
-Unsafe SQL exists only in this script, scoped to its newly created event.
-The script removes its event and seats when finished.
-
-Both comparisons passed during the November 19 rehearsal. For an interview,
-first show the unsafe output, explain the gap between SELECT and UPDATE, then
-show the conditional UPDATE and the safe result. Follow with the HTTP race test
-and explain how replay recovers a confirmed booking after a lost response.
-
-A hosted demo is still pending an authenticated hosting target and deployment
-configuration. No hosting resource has been provisioned. Visual browser checking
-also remains pending. Days 17 and 18 were brought forward at the user's request;
-the next daily milestone is Day 19 on November 20. Release verification must
-include these outstanding items.
+reporting. The isolated race demonstration and desktop/mobile Chromium checks are verified.
+Live hosting remains pending a connected account.

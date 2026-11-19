@@ -116,3 +116,44 @@ class CreateEventTests(unittest.TestCase):
         body = response.get_data(as_text=True)
         self.assertIn("temporarily unavailable", body)
         self.assertNotIn("connection failed", body)
+
+    def test_legacy_inventory_survives_migrations_and_can_be_booked(self):
+        from pathlib import Path
+        from uuid import uuid4
+        from psycopg import sql
+
+        schema = "upgrade_" + uuid4().hex
+        with psycopg.connect(self.database_url, autocommit=True) as connection:
+            connection.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
+        try:
+            upgraded = psycopg.conninfo.make_conninfo(self.database_url, options=f"-c search_path={schema}")
+            with psycopg.connect(upgraded, autocommit=True) as connection:
+                connection.execute("""
+                    CREATE TABLE events (
+                        id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                        name text NOT NULL CHECK (btrim(name) <> ''),
+                        starts_at timestamptz NOT NULL
+                    );
+                    CREATE TABLE seats (
+                        event_id integer NOT NULL REFERENCES events(id),
+                        label text NOT NULL CHECK (btrim(label) <> ''),
+                        PRIMARY KEY (event_id, label)
+                    );
+                    INSERT INTO events(name, starts_at) VALUES ('Legacy gig', now());
+                    INSERT INTO seats(event_id, label) SELECT id, 'A1' FROM events;
+                """)
+                for migration in sorted(Path("migrations").glob("*.sql")):
+                    connection.execute(migration.read_text())
+                event_id = connection.execute("SELECT id FROM events WHERE name = 'Legacy gig'").fetchone()[0]
+            with patch.dict(os.environ, {"DATABASE_URL": upgraded}):
+                client = app.test_client()
+                held = client.post(f"/events/{event_id}/holds", json={"seat": "A1"})
+                self.assertEqual(held.status_code, 201)
+                booked = client.post(
+                    f"/events/{event_id}/bookings",
+                    json={"seat": "A1", "hold_token": held.get_json()["hold_token"]},
+                )
+                self.assertEqual(booked.status_code, 201)
+        finally:
+            with psycopg.connect(self.database_url, autocommit=True) as connection:
+                connection.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))

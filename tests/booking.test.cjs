@@ -161,3 +161,9 @@ test("repeated clicks while a hold request is pending send one request", async (
   await pending;
   assert.equal(ui.saved().hold_token, held.hold_token);
 });
+
+test("invalid saved hold data leaves the seat controls usable", () => {
+  const ui = page(async () => response(201, held), { seat: "A1", hold_token: "old" });
+  assert.equal(ui.elements["#reservation"].hidden, true);
+  assert.equal(ui.seats[0].disabled, false);
+});

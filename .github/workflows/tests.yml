@@ -26,6 +26,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     env:
+      RUN_BROWSER_TESTS: "1"
       TEST_DATABASE_URL: postgresql://postgres:test_password@localhost:5432/lastseat_test
     steps:
       - uses: actions/checkout@v4
@@ -35,10 +36,19 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: python -m pip install -r requirements.txt
+      - run: python -m pip install -r requirements-dev.txt
+      - name: Install Chromium
+        run: python -m playwright install --with-deps chromium
       - name: Install database schema
         run: psql "$TEST_DATABASE_URL" -X -v ON_ERROR_STOP=1 -f schema.sql
       - name: Database and HTTP tests
         run: python -m unittest discover -s tests -v
       - name: Browser control tests
         run: node --test tests/booking.test.cjs
+      - name: Build production image
+        run: docker build -t lastseat:test .
+      - name: Verify production startup
+        run: |
+          docker run --detach --rm --network host --name lastseat-smoke -e DATABASE_URL="$TEST_DATABASE_URL" -e PORT=8000 lastseat:test
+          trap 'docker logs lastseat-smoke; docker stop lastseat-smoke' EXIT
+          curl --fail --retry 15 --retry-connrefused --retry-delay 1 http://127.0.0.1:8000/

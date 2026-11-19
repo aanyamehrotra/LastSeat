@@ -9,7 +9,9 @@ let busy = false;
 
 try {
   const saved = JSON.parse(sessionStorage.getItem(storageKey));
-  if (saved && typeof saved.seat === "string" && typeof saved.hold_token === "string") {
+  if (saved && typeof saved.seat === "string" && typeof saved.hold_token === "string"
+      && Number.isFinite(Date.parse(saved.expires_at))
+      && (!saved.booking || typeof saved.booking.booking_id === "string")) {
     hold = saved;
   }
 } catch {
