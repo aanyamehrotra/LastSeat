@@ -8,10 +8,13 @@ Built with Flask, PostgreSQL, plain JavaScript, and Gunicorn.
 
 ## Release status
 
+**[Try the live demo](https://lastseat-demo-3rcd.onrender.com)**
+
 The booking flow, desktop/mobile Chromium checks, database upgrades, the
-100-caller HTTP race, and production Gunicorn startup are verified. Live hosting
-is pending a connected account with the user's approved ₹0 spending limit.
-This repository contains a working local application and reproducible tests.
+100-caller HTTP race, and production Gunicorn startup are verified. The Render
+demo also passed real HTTPS checks for a hold, competing-request rejection,
+confirmation, and a retry returning the same ticket. Reproducible tests are
+included below.
 
 ## Run locally
 
@@ -113,10 +116,16 @@ user, reads PORT, and requires an external PostgreSQL database. GitHub CI runs
 the Python/browser and JavaScript suites, builds the image, and verifies its
 database-backed home page. Credentials belong in host environment settings.
 
-Live deployment is still pending Render account connection. Only the approved
-₹0 allowance may be used. Render's Free web service sleeps after 15 idle minutes,
-and its Free PostgreSQL database expires after 30 days. Existing workspace usage
-and billing must be checked before provisioning within that allowance.
+The live demo uses one Free Render web service in Singapore and Free PostgreSQL,
+within the approved ₹0 allowance. `render.yaml` binds the existing `lastseat-db`
+connection privately. `start-demo.sh` initializes one 48-seat demo event once,
+preserves existing bookings on restart, and starts Gunicorn. Initialization uses
+a database advisory lock to serialize overlapping starts.
+
+Render's Free web service sleeps after 15 idle minutes, so the first visit can
+take longer. This demo database expires on **December 20, 2026 at 01:08 IST**
+(December 19 at 19:38 UTC). The demo is temporary and must be migrated or recreated
+before expiry to remain available. No paid upgrades are selected.
 See [Render's documented limits](https://render.com/docs/free).
 
 ## Measured local performance
@@ -220,4 +229,5 @@ booking capacity. It includes the development server queue and new connections.
 A production evaluation needs a production WSGI server, deployment hardware,
 networked clients, successful bookings, sustained load, and separate error-rate
 reporting. The isolated race demonstration and desktop/mobile Chromium checks are verified.
-Live hosting remains pending a connected account.
+The Free live demo verifies deployment and booking behavior, not production-scale
+capacity or availability.
