@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: lastseat-demo
+    runtime: docker
+    plan: free
+    region: singapore
+    repo: https://github.com/aanyamehrotra/LastSeat
+    branch: main
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: sh -c 'flask --app app init-demo && exec gunicorn app:app --bind 0.0.0.0:${PORT:-8000} --workers 2 --threads 4 --timeout 30'
+    healthCheckPath: /
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: lastseat-db
+          property: connectionString

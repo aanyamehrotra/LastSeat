@@ -208,3 +208,39 @@ def create_event(name, starts_at, seats):
         raise click.ClickException("Could not create the event. No partial event was saved.")
 
     click.echo(f"Created event {event_id} with {len(labels)} seats.")
+
+
+@app.cli.command("init-demo")
+def init_demo():
+    """Initialize a new demo database and seed inventory once."""
+    from pathlib import Path
+
+    try:
+        with psycopg.connect(
+            os.environ.get("DATABASE_URL", "dbname=lastseat"),
+            connect_timeout=5,
+            autocommit=True,
+        ) as connection:
+            # A session lock also covers schema.sql's explicit transaction.
+            connection.execute("SELECT pg_advisory_lock(hashtext('lastseat:init-demo'))")
+            if connection.execute("SELECT to_regclass('public.events')").fetchone()[0] is None:
+                connection.execute(Path(__file__).with_name("schema.sql").read_text())
+            with connection.transaction():
+                existing = connection.execute(
+                    "SELECT id FROM events WHERE name = %s", ("LastSeat live demo",)
+                ).fetchone()
+                if existing is None:
+                    event_id = connection.execute(
+                        """INSERT INTO events(name, starts_at)
+                           VALUES (%s, clock_timestamp() + interval '14 days') RETURNING id""",
+                        ("LastSeat live demo",),
+                    ).fetchone()[0]
+                    with connection.cursor() as cursor:
+                        cursor.executemany(
+                            "INSERT INTO seats(event_id, label) VALUES (%s, %s)",
+                            [(event_id, f"{row}{number:02}") for row in "ABC" for number in range(1, 17)],
+                        )
+    except psycopg.Error as error:
+        app.logger.error("Demo initialization failed (SQLSTATE %s)", error.sqlstate or "connection")
+        raise click.ClickException("Could not initialize the demo database.")
+    click.echo("Demo inventory is ready.")
