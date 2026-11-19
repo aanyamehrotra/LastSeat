@@ -405,3 +405,30 @@ successfully ran all 21 database/HTTP tests and nine JavaScript tests. The event
 creation command also succeeded. Setup instructions now put schema installation
 before application startup. The rehearsal used Python 3.14 on macOS; GitHub CI
 covers Python 3.12 on Ubuntu. Visual browser verification remains pending.
+
+## Day 18 · Completed early on November 19 · Interview race demo
+
+Run against a dedicated test database:
+
+```sh
+TEST_DATABASE_URL="dbname=lastseat_test" python scripts/race_demo.py
+```
+
+The unsafe half forces two independent connections to read availability before
+either writes. Both report success, but one token overwrites the other. The safe
+half calls the real Flask hold route through test clients and checks one success,
+one conflict, and the saved winner's token. This deterministic two-caller demo
+illustrates the bug. The separate 100-caller test exercises the actual HTTP server.
+Unsafe SQL exists only in this script, scoped to its newly created event.
+The script removes its event and seats when finished.
+
+Both comparisons passed during the November 19 rehearsal. For an interview,
+first show the unsafe output, explain the gap between SELECT and UPDATE, then
+show the conditional UPDATE and the safe result. Follow with the HTTP race test
+and explain how replay recovers a confirmed booking after a lost response.
+
+A hosted demo is still pending an authenticated hosting target and deployment
+configuration. No hosting resource has been provisioned. Visual browser checking
+also remains pending. Days 17 and 18 were brought forward at the user's request;
+the next daily milestone is Day 19 on November 20. Release verification must
+include these outstanding items.
