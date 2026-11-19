@@ -4,7 +4,17 @@ A ticket-booking app for the moment two people try to book the last seat. The go
 
 ## Run locally
 
-Use Python 3.11 or newer and PostgreSQL 14 or newer. Run these commands from the repository folder. After creating the database and installing the schema below, start the app:
+Use Python 3.11 or newer and PostgreSQL 14 or newer. From a fresh checkout,
+create the database and install the schema once before starting the application:
+
+```sh
+git clone https://github.com/aanyamehrotra/LastSeat.git
+cd LastSeat
+createdb lastseat
+psql -X -v ON_ERROR_STOP=1 -d lastseat -f schema.sql
+```
+
+Then install dependencies and start the app:
 
 ```sh
 python3 -m venv .venv
@@ -386,3 +396,12 @@ A production evaluation needs a production WSGI server, deployment hardware,
 networked clients, successful bookings, sustained load, and separate error-rate
 reporting. Hosting, visual browser verification, and the isolated unsafe-versus-safe
 race demonstration remain pending project deliverables.
+
+
+## Day 17 · Completed early on November 19 · Fresh-checkout rehearsal
+
+A new GitHub clone, Python virtual environment, and empty PostgreSQL database
+successfully ran all 21 database/HTTP tests and nine JavaScript tests. The event
+creation command also succeeded. Setup instructions now put schema installation
+before application startup. The rehearsal used Python 3.14 on macOS; GitHub CI
+covers Python 3.12 on Ubuntu. Visual browser verification remains pending.
