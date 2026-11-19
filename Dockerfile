@@ -6,6 +6,7 @@ COPY app.py schema.sql ./
 COPY templates ./templates
 COPY static ./static
 COPY migrations ./migrations
+COPY start-demo.sh ./
 USER app
 ENV PORT=8000
 EXPOSE 8000
